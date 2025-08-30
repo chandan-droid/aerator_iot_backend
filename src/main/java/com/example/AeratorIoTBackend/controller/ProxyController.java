@@ -5,7 +5,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
 import jakarta.servlet.http.HttpServletRequest;
-
 import java.net.URI;
 import java.util.Enumeration;
 
@@ -15,70 +14,74 @@ public class ProxyController {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    // Base URL of your Render backend
+    // Your Render backend base URL
     private final String targetBaseUrl = "https://aerator-iot-backend.onrender.com";
 
     private HttpHeaders buildHeaders(HttpServletRequest request) {
         HttpHeaders headers = new HttpHeaders();
         Enumeration<String> headerNames = request.getHeaderNames();
+
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
+            if (headerName.equalsIgnoreCase("host") ||
+                headerName.equalsIgnoreCase("content-length") ||
+                headerName.equalsIgnoreCase("transfer-encoding")) {
+                continue; // skip problematic headers
+            }
             headers.add(headerName, request.getHeader(headerName));
         }
+
         return headers;
     }
 
-    // Handle GET requests
+    private ResponseEntity<byte[]> forwardRequest(
+            HttpServletRequest request,
+            HttpMethod method,
+            String body
+    ) {
+        String path = request.getRequestURI().replaceFirst("/proxy", "");
+        String url = targetBaseUrl + path;
+
+        HttpHeaders headers = buildHeaders(request);
+        HttpEntity<String> entity = (body != null)
+                ? new HttpEntity<>(body, headers)
+                : new HttpEntity<>(headers);
+
+        ResponseEntity<byte[]> response = restTemplate.exchange(
+                URI.create(url),
+                method,
+                entity,
+                byte[].class
+        );
+
+        // Forward status, headers, and raw body
+        HttpHeaders responseHeaders = new HttpHeaders();
+        response.getHeaders().forEach((key, value) -> responseHeaders.put(key, value));
+
+        return new ResponseEntity<>(
+                response.getBody(),
+                responseHeaders,
+                response.getStatusCode()
+        );
+    }
+
     @GetMapping("/**")
-    public ResponseEntity<String> proxyGet(HttpServletRequest request) {
-        String path = request.getRequestURI().replaceFirst("/proxy", "");
-        String url = targetBaseUrl + path;
-
-        HttpEntity<String> entity = new HttpEntity<>(buildHeaders(request));
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-
-        return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
+    public ResponseEntity<byte[]> proxyGet(HttpServletRequest request) {
+        return forwardRequest(request, HttpMethod.GET, null);
     }
 
-    // Handle POST requests
     @PostMapping("/**")
-    public ResponseEntity<String> proxyPost(HttpServletRequest request, @RequestBody String body) {
-        String path = request.getRequestURI().replaceFirst("/proxy", "");
-        String url = targetBaseUrl + path;
-
-        HttpHeaders headers = buildHeaders(request);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-
-        HttpEntity<String> entity = new HttpEntity<>(body, headers);
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
-
-        return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
+    public ResponseEntity<byte[]> proxyPost(HttpServletRequest request, @RequestBody(required = false) String body) {
+        return forwardRequest(request, HttpMethod.POST, body);
     }
 
-    // Handle PUT requests
     @PutMapping("/**")
-    public ResponseEntity<String> proxyPut(HttpServletRequest request, @RequestBody String body) {
-        String path = request.getRequestURI().replaceFirst("/proxy", "");
-        String url = targetBaseUrl + path;
-
-        HttpHeaders headers = buildHeaders(request);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-
-        HttpEntity<String> entity = new HttpEntity<>(body, headers);
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.PUT, entity, String.class);
-
-        return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
+    public ResponseEntity<byte[]> proxyPut(HttpServletRequest request, @RequestBody(required = false) String body) {
+        return forwardRequest(request, HttpMethod.PUT, body);
     }
 
-    // Handle DELETE requests
     @DeleteMapping("/**")
-    public ResponseEntity<String> proxyDelete(HttpServletRequest request) {
-        String path = request.getRequestURI().replaceFirst("/proxy", "");
-        String url = targetBaseUrl + path;
-
-        HttpEntity<String> entity = new HttpEntity<>(buildHeaders(request));
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.DELETE, entity, String.class);
-
-        return ResponseEntity.status(response.getStatusCode()).body(response.getBody());
+    public ResponseEntity<byte[]> proxyDelete(HttpServletRequest request) {
+        return forwardRequest(request, HttpMethod.DELETE, null);
     }
 }
